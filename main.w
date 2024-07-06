@@ -2,14 +2,11 @@ bring cloud;
 bring cognito;
 bring dynamodb;
 
-
 inflight class JsExample {
-  pub extern "./handler.ts" static RequestUnicorn(body: str): str;
+  pub extern "./handler.ts" static RequestUnicorn(body: str, username: str): str;
 }
 
-
-// let WildRydesBucket = new cloud.Bucket({public: true});
-let WildRydesApi = new cloud.Api({cors: true});
+let WildRydesApi = new cloud.Api({cors: true, corsOptions: {allowOrigin: "*"}});
 let WildRydesDynamoDBTable = new dynamodb.Table(
   attributes: [
     {
@@ -19,33 +16,41 @@ let WildRydesDynamoDBTable = new dynamodb.Table(
   ],
   hashKey: "RideId",
 );
+let WildRydesCognito = new cognito.Cognito(WildRydesApi);
 
 
-let RecordRide = new cloud.Function(inflight (tmp) => {
-  let data = Json.parse(tmp!);
+let RequestUnicorn = new cloud.Function(inflight (body) => {
+  let result = JsExample.RequestUnicorn(body!, "WildRydesCognito.clientId");
+  let data = Json.parse(result);
+  log(data);
   WildRydesDynamoDBTable.put(
     Item: {
         RideId: data["RideId"],
-        User: data["username"],
+        User: data["Rider"],
         Unicorn: data["unicorn"],
         UnicornName: data["unicorn"]["Name"],
         RequestTime: data["RequestTime"],
     },
     ReturnValues: "NONE",
   );
-}) as "Record Ride";
-
-let RequestUnicorn = new cloud.Function(inflight (body) => {
-  let result = JsExample.RequestUnicorn(body!);
   return result;
 }) as "Request Unicorn";
 
-WildRydesApi.post("/ride", inflight (request: cloud.ApiRequest): cloud.ApiResponse => {
+WildRydesApi.post("/test", inflight (request) => {
+  let body = Json.parse(request.body!);
+  let user = str.fromJson(body["username"]);
+  let tmp = "hello {user} !! it's your 22th birthday !!!!!";
+  return cloud.ApiResponse {
+      status: 200,
+      // headers: {"Content-Type": "application/json"},
+      body: tmp
+  };
+});
+
+WildRydesApi.post("/ride", inflight (request) => {
   let body = request.body;
   let data = RequestUnicorn.invoke(body!);
   let _data = Json.parse(data!);
-  // log(_data);
-  let saveResult = RecordRide.invoke(data);
   return cloud.ApiResponse {
     status: 201,
     body: Json.stringify({
@@ -53,10 +58,15 @@ WildRydesApi.post("/ride", inflight (request: cloud.ApiRequest): cloud.ApiRespon
       Unicorn: _data["unicorn"],
       UnicornName: _data["unicorn"]["Name"],
       Eta: "30 seconds",
-      Rider: _data["username"],
+      Rider: _data["Rider"],
     }),
     headers: {
       "Access-Control-Allow-Origin": "*",
+      "Content-Type" : "application/json"
     },
   };
 });
+
+// protected endpoints
+
+WildRydesCognito.post("/ride");
